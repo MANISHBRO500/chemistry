@@ -1,0 +1,6 @@
+{
+  "name": "BondBoard Chemistry Studio",
+  "description": "Touch-first 2D/3D organic molecular whiteboard, IUPAC analyzer, and Gemini AI chemistry tutor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

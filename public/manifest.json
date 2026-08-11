@@ -1,0 +1,22 @@
+{
+  "short_name": "BondBoard",
+  "name": "BondBoard Chemistry Studio",
+  "description": "Touch-first 2D/3D organic molecular whiteboard, IUPAC analyzer, and Gemini AI chemistry tutor.",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0a1e1a",
+  "theme_color": "#0e2a24",
+  "display": "standalone",
+  "orientation": "any"
+}

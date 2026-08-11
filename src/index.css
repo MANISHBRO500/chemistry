@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --ink: #12342d;
+    --paper: #f7faf6;
+    --teal: #087f71;
+    --mint: #daf2e9;
+    --line: #dbe7df;
+  }
+  
+  body {
+    background-color: #0b1f1b;
+    color: var(--ink);
+    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+/* Custom scrollbar styling for horizontal tool lists */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Molecule SVG styles */
+.bond {
+  stroke: #163b32;
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke 0.15s ease;
+}
+.bond:hover {
+  stroke: #087f71;
+}
+
+.atom circle {
+  stroke: #ffffff;
+  stroke-width: 3;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.atom text {
+  font-weight: 800;
+  fill: #ffffff;
+  font-size: 16px;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.atom.selected-atom circle {
+  stroke: #13b69a;
+  stroke-width: 5px;
+}
+
+/* Pulse animation for AI activity */
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s infinite ease-in-out;
+}
+
