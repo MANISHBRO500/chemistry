@@ -7,9 +7,28 @@ import { Inspector } from './components/Inspector';
 import { Atom, Bond, Slide, ViewMode, ToolType, ChatMessage } from './types';
 import { FUNCTIONAL_GROUPS } from './constants';
 import { analyseCompound, connectedComponents, canBond, bondProblem } from './chemistryUtils';
+import { fetchPubChemDirect, fetchPubChemDetailsDirect } from './pubchemClient';
+import { generateSmartChemistryResponse } from './aiChemistryEngine';
 
 const STORAGE_KEY_V5 = 'bondboard-molecule-state-v5';
 const STORAGE_KEY_LEGACY = 'bondboard-molecule-state-v4';
+
+// Resolves backend API URL for both web browser and native Android APK (Capacitor)
+const getApiEndpoint = (endpoint: string): string => {
+  if (typeof window === 'undefined') return endpoint;
+
+  const isCloudRunHost = window.location.hostname.endsWith('.run.app');
+  const isLocalDevServer = window.location.hostname === 'localhost' && window.location.port === '3000';
+
+  // If running directly on the hosted web server or local dev server on port 3000, use relative path
+  if (isCloudRunHost || isLocalDevServer) {
+    return endpoint;
+  }
+
+  // For Android APK, Capacitor WebView, file://, localhost app bundles, or external wrappers
+  const REMOTE_SERVER_URL = 'https://ais-pre-wdjbxo5ldtxgvylcapgavy-611324387209.asia-southeast1.run.app';
+  return `${REMOTE_SERVER_URL}${endpoint}`;
+};
 
 export default function App() {
   const [projectName, setProjectName] = useState('Organic Chemistry Whiteboard');
@@ -591,7 +610,15 @@ export default function App() {
     }
     setIsLoadingPubchem(true);
     try {
-      const res = await fetch(`/api/pubchem/${encodeURIComponent(name)}`);
+      // Try direct client PubChem lookup first
+      const directData = await fetchPubChemDetailsDirect(name);
+      if (directData) {
+        setPubchemData(directData);
+        return;
+      }
+
+      // Server proxy fallback
+      const res = await fetch(getApiEndpoint(`/api/pubchem/${encodeURIComponent(name)}`));
       if (!res.ok) throw new Error('Not found');
       const data = await res.json();
       setPubchemData(data);
@@ -615,11 +642,25 @@ export default function App() {
 
     if (typeof target === 'string' && target.trim()) {
       setIsAiLoading(true);
+      const query = target.trim();
+
       try {
-        const res = await fetch('/api/compound/draw', {
+        // 1. Try direct PubChem client-side REST call first (fast & works 100% in mobile APKs)
+        const directResult = await fetchPubChemDirect(query);
+        if (directResult && directResult.atoms && directResult.atoms.length > 0) {
+          pushHistory();
+          setAtoms(directResult.atoms);
+          setBonds(directResult.bonds || []);
+          setSelectedAtomId(null);
+          setProjectName(directResult.name || query);
+          return;
+        }
+
+        // 2. Try server backend endpoint if direct PubChem did not return structure
+        const res = await fetch(getApiEndpoint('/api/compound/draw'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: target.trim() })
+          body: JSON.stringify({ name: query })
         });
         const data = await res.json();
         if (data.success && data.atoms && data.atoms.length > 0) {
@@ -627,12 +668,12 @@ export default function App() {
           setAtoms(data.atoms);
           setBonds(data.bonds || []);
           setSelectedAtomId(null);
-          setProjectName(data.name || target.trim());
+          setProjectName(data.name || query);
         } else {
-          alert(`Could not draw "${target}". Try typing a valid IUPAC or common chemical name.`);
+          alert(`Could not draw "${query}". Try typing a valid IUPAC or common chemical name (e.g. Aspirin, Benzene, Acetone).`);
         }
       } catch (err) {
-        alert(`Failed to auto-draw "${target}". Please check your internet connection.`);
+        alert(`Could not find 2D coordinates for "${query}". Try typing a common chemical name like Benzene, Aspirin, Ethanol, or Acetone.`);
       } finally {
         setIsAiLoading(false);
       }
@@ -657,7 +698,7 @@ export default function App() {
     try {
       const allNames = compoundAnalyses.map((c, i) => `Structure #${i + 1}: ${c.naming.name}`).join('; ');
 
-      const res = await fetch('/api/ai/chemistry', {
+      const res = await fetch(getApiEndpoint('/api/ai/chemistry'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -681,42 +722,78 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.answer) {
+          const aiMsg: ChatMessage = {
+            id: `ai-${Date.now()}`,
+            role: 'assistant',
+            content: data.answer,
+            timestamp: Date.now()
+          };
+          setChatMessages(prev => [...prev, aiMsg]);
 
-      const aiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
-        role: 'assistant',
-        content: data.answer,
-        timestamp: Date.now()
-      };
-      setChatMessages(prev => [...prev, aiMsg]);
-
-      // If AI answer contains structure JSON, automatically draw on canvas
-      const jsonMatch = data.answer?.match(/```(?:json\s*structure|json)?\s*([\s\S]*?)```/i);
-      if (jsonMatch) {
-        try {
-          const struct = JSON.parse(jsonMatch[1]);
-          if (struct.atoms && Array.isArray(struct.atoms) && struct.atoms.length > 0) {
-            pushHistory();
-            setAtoms(struct.atoms);
-            setBonds(struct.bonds || []);
-            setSelectedAtomId(null);
-            if (struct.name) {
-              handleRenameSlide(currentSlide.id, struct.name);
+          // If AI answer contains structure JSON, automatically draw on canvas
+          const jsonMatch = data.answer?.match(/```(?:json\s*structure|json)?\s*([\s\S]*?)```/i);
+          if (jsonMatch) {
+            try {
+              const struct = JSON.parse(jsonMatch[1]);
+              if (struct.atoms && Array.isArray(struct.atoms) && struct.atoms.length > 0) {
+                pushHistory();
+                setAtoms(struct.atoms);
+                setBonds(struct.bonds || []);
+                setSelectedAtomId(null);
+                if (struct.name) {
+                  handleRenameSlide(currentSlide.id, struct.name);
+                }
+              }
+            } catch (e) {
+              // ignore JSON parse error
             }
           }
-        } catch (e) {
-          // ignore JSON parse error
+          return;
         }
       }
-    } catch (err: any) {
+
+      // If server returned non-JSON, 404, error, or preview auth redirect, generate smart local chemistry answer
+      const smartResult = await generateSmartChemistryResponse(userQuery, activeCompoundAnalysis, currentSlide.name);
+
+      if (smartResult.drawData && smartResult.drawData.atoms) {
+        pushHistory();
+        setAtoms(smartResult.drawData.atoms);
+        setBonds(smartResult.drawData.bonds || []);
+        setSelectedAtomId(null);
+        handleRenameSlide(currentSlide.id, smartResult.drawData.name || 'Auto-drawn Compound');
+      }
+
       setChatMessages(prev => [
         ...prev,
         {
-          id: `err-${Date.now()}`,
+          id: `ai-${Date.now()}`,
           role: 'assistant',
-          content: `⚠️ ${err.message || 'Error communicating with Gemini AI. Ensure GEMINI_API_KEY is active.'}`,
+          content: smartResult.text,
+          timestamp: Date.now()
+        }
+      ]);
+    } catch (err: any) {
+      console.warn('AI Tutor remote call error, generating smart local response:', err);
+      const smartResult = await generateSmartChemistryResponse(userQuery, activeCompoundAnalysis, currentSlide.name);
+
+      if (smartResult.drawData && smartResult.drawData.atoms) {
+        pushHistory();
+        setAtoms(smartResult.drawData.atoms);
+        setBonds(smartResult.drawData.bonds || []);
+        setSelectedAtomId(null);
+        handleRenameSlide(currentSlide.id, smartResult.drawData.name || 'Auto-drawn Compound');
+      }
+
+      setChatMessages(prev => [
+        ...prev,
+        {
+          id: `ai-${Date.now()}`,
+          role: 'assistant',
+          content: smartResult.text,
           timestamp: Date.now()
         }
       ]);
